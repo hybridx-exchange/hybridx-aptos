@@ -1,5 +1,5 @@
 [package]
-name = "HybridX"
+name = "hybridx"
 version = "0.0.0"
 
 [dependencies]
