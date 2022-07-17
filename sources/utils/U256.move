@@ -375,28 +375,32 @@ module Sender::U256 {
 
     #[test]
     fun test_mul2() {
-        let a = from_u128(10000000);
-        let b = from_u64(10000000);
+        let a = from_u128(99999999);
+        let b = from_u64(77777777);
         let ret = mul(a, b);
-        assert!(compare(&ret, &from_u64(100000000000000)) == EQUAL, 0);
+        assert!(compare(&ret, &from_u64(99999999 * 77777777)) == EQUAL, 0);
     }
 
     #[test]
     fun test_mul3() {
-        let a = from_u128(10000000000000000000u128);
-        let b = from_u128(10000000000000000000u128);
+        let a = from_u128((P64MAX as u128));
+        let b = from_u128((P64MAX as u128));
         let ret = mul(a, b);
 
-        assert!(compare(&ret, &from_u128(100000000000000000000000000000000000000u128)) == EQUAL, 0);
+        assert!(compare(&ret, &from_u128((P64MAX as u128) * (P64MAX as u128))) == EQUAL, 0);
     }
 
     #[test]
     #[expected_failure]
     fun test_mul_overflow() {
-        let a = from_u128(340282366920938463463374607431768211455u128);
-        let b = from_u128(340282366920938463463374607431768211455u128);
-        let c = add(a, b);
-        let _ret = mul(b, c);
+        let va = Vector::empty<u64>();
+        Vector::push_back<u64>(&mut va, P64MAX);
+        Vector::push_back<u64>(&mut va, P64MAX);
+        Vector::push_back<u64>(&mut va, P64MAX);
+        Vector::push_back<u64>(&mut va, P64MAX);
+        let a = U256 { bits: va };
+        let b = from_u128(2u128);
+        mul(a, b);
     }
 
     /*public fun div(a: U256, b: U256): U256 {
