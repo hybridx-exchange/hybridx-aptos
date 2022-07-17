@@ -23,6 +23,17 @@ module Sender::Arith {
         ensures result_2 == i % P32;
     }
 
+    /// split u64 to (high, low)
+    public fun split_u128(i: u128): (u64, u64) {
+        (((i >> 64) as u64), ((i & 0xFFFFFFFFFFFFFFFF) as u64))
+    }
+
+    spec split_u128 {
+        pragma opaque; // MVP cannot reason about bitwise operation
+        ensures result_1 == i / P64;
+        ensures result_2 == i % P64;
+    }
+
     /// combine (high, low) to u64,
     /// any lower bits of `high` will be erased, any higher bits of `low` will be erased.
     public fun combine_u64(hi: u64, lo: u64): u64 {
@@ -36,7 +47,7 @@ module Sender::Arith {
         ensures result == hi_32 * P32 + lo_32;
     }
 
-    /// a + b, with carry 65 + 63 = [1, 1] + [0, 63] => 64 [1, 0]
+    /// a + b, with carry
     public fun adc(a: u64, b: u64, carry: &mut u64) : u64 {
         assert!(*carry <= 1, Errors::invalid_argument(ERR_INVALID_CARRY));
         let (a1, a0) = split_u64(a);
@@ -107,6 +118,59 @@ module Sender::U256 {
 
     spec U256 {
         invariant len(bits) == 4;
+    }
+
+    public fun mul(a: U256, b: U256): U256 {
+        let c_bits = Vector::empty<u64>();
+        let (i, j) = (0u64, 0u64);
+        let len = (WORD as u64);
+        let (c_i, c_len) = (0u64, len * 2);
+        while (c_i < c_len) {
+            Vector::push_back(&mut c_bits, 0u64);
+            c_i = c_i + 1;
+        };
+
+        while(i < len) {
+            let carry = 0u64;
+            let b_bit = Vector::borrow<u64>(&b.bits, i);
+
+            while(j < len) {
+                let a_bit = Vector::borrow<u64>(&a.bits, j);
+                let (hig, low) = Sender::Arith::split_u128((*a_bit as u128) * (*b_bit as u128));
+
+                let overflow = {
+                    let existing_low = Vector::borrow_mut<u64>(&mut c_bits, i + j);
+                    let carry_tmp = 0u64;
+                    *existing_low = Sender::Arith::adc(low, *existing_low, &mut carry_tmp);
+                    carry_tmp
+                };
+
+                carry = {
+                    let existing_hig = Vector::borrow_mut<u64>(&mut c_bits, i + j + 1);
+                    let hig = hig + overflow;
+                    let carry_tmp0 = 0u64;
+                    let carry_tmp1 = 0u64;
+
+                    let hig = Sender::Arith::adc(hig, carry, &mut carry_tmp0);
+                    let hig = Sender::Arith::adc(hig, *existing_hig, &mut carry_tmp1);
+                    *existing_hig = hig;
+                    carry_tmp0 | carry_tmp1
+                };
+
+                j = j + 1;
+            };
+
+            i = i + 1;
+        };
+
+        c_i = Vector::length(&c_bits) - 1;
+        while(c_i >= len) {
+            let overflow = Vector::remove(&mut c_bits, c_i);
+            assert!(overflow == 0, 100);
+            c_i = c_i - 1;
+        };
+
+        U256 { bits: c_bits }
     }
 
     spec fun value_of_U256(a: U256): num {
@@ -219,15 +283,6 @@ module Sender::U256 {
         return EQUAL
     }
 
-    // TODO: MVP interprets it wrong
-    // spec compare {
-    //     let va = value_of_U256(a);
-    //     let vb = value_of_U256(b);
-    //     ensures (va > vb) ==> (result == GREATER_THAN);
-    //     ensures (va < vb) ==> (result == LESS_THAN);
-    //     ensures (va == vb) ==> (result == EQUAL);
-    // }
-
     #[test]
     fun test_compare() {
         let a = from_u64(111);
@@ -301,7 +356,9 @@ module Sender::U256 {
         assert!(compare(&ret, &from_u64(9)) == EQUAL, 0);
     }
 
-    /*spec mul {
+
+
+    spec mul {
         pragma verify = false;
         pragma timeout = 200; // Take longer time
         aborts_if value_of_U256(a) * value_of_U256(b) >= P64 * P64 * P64 * P64;
@@ -316,7 +373,33 @@ module Sender::U256 {
         assert!(compare(&ret, &from_u64(100)) == EQUAL, 0);
     }
 
-    public fun div(a: U256, b: U256): U256 {
+    #[test]
+    fun test_mul2() {
+        let a = from_u128(10000000);
+        let b = from_u64(10000000);
+        let ret = mul(a, b);
+        assert!(compare(&ret, &from_u64(100000000000000)) == EQUAL, 0);
+    }
+
+    #[test]
+    fun test_mul3() {
+        let a = from_u128(10000000000000000000u128);
+        let b = from_u128(10000000000000000000u128);
+        let ret = mul(a, b);
+
+        assert!(compare(&ret, &from_u128(100000000000000000000000000000000000000u128)) == EQUAL, 0);
+    }
+
+    #[test]
+    #[expected_failure]
+    fun test_mul_overflow() {
+        let a = from_u128(340282366920938463463374607431768211455u128);
+        let b = from_u128(340282366920938463463374607431768211455u128);
+        let c = add(a, b);
+        let _ret = mul(b, c);
+    }
+
+    /*public fun div(a: U256, b: U256): U256 {
         native_div(&mut a, &b);
         a
     }
@@ -401,6 +484,24 @@ module Sender::U256 {
 
         // check overflow
         assert!(carry == 0, 100);
+    }
+
+    /// move implementation of native_add.
+    fun add_overflow_nocarry(a: & U256, b: &U256): (U256, bool) {
+        let carry = 0;
+        let idx = 0;
+        let len = (WORD as u64);
+        let c_bits = Vector::empty<u64>();
+        while (idx < len) {
+            let a_bit = Vector::borrow<u64>(&a.bits, idx);
+            let b_bit = Vector::borrow<u64>(&b.bits, idx);
+            let c_bit = Sender::Arith::adc(*a_bit, *b_bit, &mut carry);
+            Vector::push_back(&mut c_bits, c_bit);
+            idx = idx + 1;
+        };
+
+        // check overflow
+        (U256{ bits: c_bits }, carry == 0)
     }
 
     #[test]
