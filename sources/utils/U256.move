@@ -36,7 +36,7 @@ module Sender::Arith {
         ensures result == hi_32 * P32 + lo_32;
     }
 
-    /// a + b, with carry
+    /// a + b, with carry 65 + 63 = [1, 1] + [0, 63] => 64 [1, 0]
     public fun adc(a: u64, b: u64, carry: &mut u64) : u64 {
         assert!(*carry <= 1, Errors::invalid_argument(ERR_INVALID_CARRY));
         let (a1, a0) = split_u64(a);
@@ -92,6 +92,8 @@ module Sender::U256 {
     const WORD: u8 = 4;
     const P32: u64 = 0x100000000;
     const P64: u128 = 0x10000000000000000;
+    const P64MAX: u64 = 0xffffffffffffffff;
+    const P128MAX: u128 = 0xffffffffffffffffffffffffffffffff;
 
     const ERR_INVALID_LENGTH: u64 = 100;
     const ERR_OVERFLOW: u64 = 200;
@@ -122,6 +124,22 @@ module Sender::U256 {
         from_u128(1u128)
     }
 
+    public fun max(): U256 {
+        let bits = Vector::singleton<u64>(P64MAX);
+        Vector::push_back<u64>(&mut bits, P64MAX);
+        Vector::push_back<u64>(&mut bits, P64MAX);
+        Vector::push_back<u64>(&mut bits, P64MAX);
+        U256 { bits }
+    }
+
+    public fun max_1(): U256 {
+        let bits = Vector::singleton<u64>(P64MAX-1);
+        Vector::push_back<u64>(&mut bits, P64MAX);
+        Vector::push_back<u64>(&mut bits, P64MAX);
+        Vector::push_back<u64>(&mut bits, P64MAX);
+        U256 { bits }
+    }
+
     public fun from_u64(v: u64): U256 {
         from_u128((v as u128))
     }
@@ -129,10 +147,10 @@ module Sender::U256 {
     public fun from_u128(v: u128): U256 {
         let low = ((v & 0xffffffffffffffff) as u64);
         let high = ((v >> 64) as u64);
-        let bits = Vector::singleton(low);
-        Vector::push_back(&mut bits, high);
-        Vector::push_back(&mut bits, 0u64);
-        Vector::push_back(&mut bits, 0u64);
+        let bits = Vector::singleton<u64>(low);
+        Vector::push_back<u64>(&mut bits, high);
+        Vector::push_back<u64>(&mut bits, 0u64);
+        Vector::push_back<u64>(&mut bits, 0u64);
         U256 { bits }
     }
 
@@ -145,36 +163,16 @@ module Sender::U256 {
     fun test_from_u128() {
         // 2^64 + 1
         let v = from_u128(18446744073709551617u128);
-        assert!(*Vector::borrow(&v.bits, 0) == 1, 0);
-        assert!(*Vector::borrow(&v.bits, 1) == 1, 1);
-        assert!(*Vector::borrow(&v.bits, 2) == 0, 2);
-        assert!(*Vector::borrow(&v.bits, 3) == 0, 3);
-    }
-
-    public fun from_big_endian(data: vector<u8>): U256 {
-        // TODO: define error code.
-        assert!(Vector::length(&data) <= 32, Errors::invalid_argument(ERR_INVALID_LENGTH));
-        from_bytes(&data, true)
-    }
-
-    spec from_big_endian {
-        pragma verify = false; // TODO: How to interpret the value of vector data of bytes
-    }
-
-    public fun from_little_endian(data: vector<u8>): U256 {
-        // TODO: define error code.
-        assert!(Vector::length(&data) <= 32, Errors::invalid_argument(ERR_INVALID_LENGTH));
-        from_bytes(&data, false)
-    }
-
-    spec from_little_endian {
-        pragma verify = false; // TODO: How to interpret the value of vector data of bytes
+        assert!(*Vector::borrow<u64>(&v.bits, 0) == 1, 0);
+        assert!(*Vector::borrow<u64>(&v.bits, 1) == 1, 1);
+        assert!(*Vector::borrow<u64>(&v.bits, 2) == 0, 2);
+        assert!(*Vector::borrow<u64>(&v.bits, 3) == 0, 3);
     }
 
     public fun to_u128(v: &U256): u128 {
-        assert!(*Vector::borrow(&v.bits, 3) == 0, Errors::invalid_state(ERR_OVERFLOW));
-        assert!(*Vector::borrow(&v.bits, 2) == 0, Errors::invalid_state(ERR_OVERFLOW));
-        ((*Vector::borrow(&v.bits, 1) as u128) << 64) | (*Vector::borrow(&v.bits, 0) as u128)
+        assert!(*Vector::borrow<u64>(&v.bits, 3) == 0, Errors::invalid_state(ERR_OVERFLOW));
+        assert!(*Vector::borrow<u64>(&v.bits, 2) == 0, Errors::invalid_state(ERR_OVERFLOW));
+        ((*Vector::borrow<u64>(&v.bits, 1) as u128) << 64) | (*Vector::borrow<u64>(&v.bits, 0) as u128)
     }
 
     spec to_u128 {
@@ -208,8 +206,8 @@ module Sender::U256 {
         let i = (WORD as u64);
         while (i > 0) {
             i = i - 1;
-            let a_bits = *Vector::borrow(&a.bits, i);
-            let b_bits = *Vector::borrow(&b.bits, i);
+            let a_bits = *Vector::borrow<u64>(&a.bits, i);
+            let b_bits = *Vector::borrow<u64>(&b.bits, i);
             if (a_bits != b_bits) {
                 if (a_bits < b_bits) {
                     return LESS_THAN
@@ -243,7 +241,7 @@ module Sender::U256 {
 
 
     public fun add(a: U256, b: U256): U256 {
-        native_add(&mut a, &b);
+        add_nocarry(&mut a, &b);
         a
     }
 
@@ -260,8 +258,25 @@ module Sender::U256 {
         assert!(compare(&ret, &from_u64(11)) == EQUAL, 0);
     }
 
+    #[test]
+    fun test_add2() {
+        let a = one();
+        let b = max_1();
+        let ret = add(a, b);
+        assert!(compare(&ret, &max()) == EQUAL, 0);
+    }
+
+    #[test]
+    #[expected_failure]
+    fun test_add_overflow() {
+        let a = one();
+        let b = max();
+        let _ret = add(a, b);
+        //assert!(compare(&ret, &from_u128(0)) == EQUAL, 0);
+    }
+
     public fun sub(a: U256, b: U256): U256 {
-        native_sub(&mut a, &b);
+        sub_noborrow(&mut a, &b);
         a
     }
 
@@ -286,12 +301,7 @@ module Sender::U256 {
         assert!(compare(&ret, &from_u64(9)) == EQUAL, 0);
     }
 
-    public fun mul(a: U256, b: U256): U256 {
-        native_mul(&mut a, &b);
-        a
-    }
-
-    spec mul {
+    /*spec mul {
         pragma verify = false;
         pragma timeout = 200; // Take longer time
         aborts_if value_of_U256(a) * value_of_U256(b) >= P64 * P64 * P64 * P64;
@@ -375,7 +385,7 @@ module Sender::U256 {
         assert!(compare(&pow(copy a, b), &from_u64(10)) == EQUAL, 0);
         assert!(compare(&pow(copy a, c), &from_u64(100)) == EQUAL, 0);
         assert!(compare(&pow(copy a, d), &from_u64(1)) == EQUAL, 0);
-    }
+    }*/
 
     /// move implementation of native_add.
     fun add_nocarry(a: &mut U256, b: &U256) {
@@ -383,8 +393,8 @@ module Sender::U256 {
         let idx = 0;
         let len = (WORD as u64);
         while (idx < len) {
-            let a_bit = Vector::borrow_mut(&mut a.bits, idx);
-            let b_bit = Vector::borrow(&b.bits, idx);
+            let a_bit = Vector::borrow_mut<u64>(&mut a.bits, idx);
+            let b_bit = Vector::borrow<u64>(&b.bits, idx);
             *a_bit = Sender::Arith::adc(*a_bit, *b_bit, &mut carry);
             idx = idx + 1;
         };
@@ -393,74 +403,24 @@ module Sender::U256 {
         assert!(carry == 0, 100);
     }
 
-    // TODO: MVP find false examples that violate the spec
-    // spec add_nocarry {
-    //     aborts_if value_of_U256(a) + value_of_U256(b) >= P64 * P64 * P64 * P64;
-    //     ensures value_of_U256(a) == value_of_U256(old(a)) + value_of_U256(b);
-    // }
-
     #[test]
     #[expected_failure]
     fun test_add_nocarry_overflow() {
-        let va = Vector::empty();
-        Vector::push_back(&mut va, 15891);
-        Vector::push_back(&mut va, 0);
-        Vector::push_back(&mut va, 0);
-        Vector::push_back(&mut va, 0);
+        let va = Vector::empty<u64>();
+        Vector::push_back<u64>(&mut va, 15891);
+        Vector::push_back<u64>(&mut va, 0);
+        Vector::push_back<u64>(&mut va, 0);
+        Vector::push_back<u64>(&mut va, 0);
 
-        let vb = Vector::empty();
-        Vector::push_back(&mut vb, 18446744073709535725);
-        Vector::push_back(&mut vb, 18446744073709551615);
-        Vector::push_back(&mut vb, 18446744073709551615);
-        Vector::push_back(&mut vb, 18446744073709551615);
+        let vb = Vector::empty<u64>();
+        Vector::push_back<u64>(&mut vb, 18446744073709535725);
+        Vector::push_back<u64>(&mut vb, 18446744073709551615);
+        Vector::push_back<u64>(&mut vb, 18446744073709551615);
+        Vector::push_back<u64>(&mut vb, 18446744073709551615);
 
         let a = U256 { bits: va };
         let b = U256 { bits: vb };
         add_nocarry(&mut a, &b); // MVP thinks this won't abort
-    }
-
-    #[test]
-    fun test_add_nocarry_like_native_1() {
-        let va = Vector::empty();
-        Vector::push_back(&mut va, 15891);
-        Vector::push_back(&mut va, 0);
-        Vector::push_back(&mut va, 0);
-        Vector::push_back(&mut va, 0);
-
-        let vb = Vector::empty();
-        Vector::push_back(&mut vb, 18446744073709535724);
-        Vector::push_back(&mut vb, 18446744073709551615);
-        Vector::push_back(&mut vb, 18446744073709551615);
-        Vector::push_back(&mut vb, 18446744073709551615);
-
-        let a1 = U256 { bits: va };
-        let a2 = copy a1;
-        let b = U256 { bits: vb };
-        add_nocarry(&mut a1, &b);
-        native_add(&mut a2, &b);
-        assert!(compare(&a1, &a2) == EQUAL, 0); // MVP thinks this doesn't hold
-    }
-
-    #[test]
-    fun test_add_nocarry_like_native_2() {
-        let va = Vector::empty();
-        Vector::push_back(&mut va, 26962);
-        Vector::push_back(&mut va, 24464);
-        Vector::push_back(&mut va, 6334);
-        Vector::push_back(&mut va, 19169);
-
-        let vb = Vector::empty();
-        Vector::push_back(&mut vb, 29358);
-        Vector::push_back(&mut vb, 26500);
-        Vector::push_back(&mut vb, 15724);
-        Vector::push_back(&mut vb, 11478);
-
-        let a1 = U256 { bits: va };
-        let a2 = copy a1;
-        let b = U256 { bits: vb };
-        add_nocarry(&mut a1, &b); // MVP thinks this abort
-        native_add(&mut a2, &b);
-        assert!(compare(&a1, &a2) == EQUAL, 0);
     }
 
     /// move implementation of native_sub.
@@ -469,77 +429,13 @@ module Sender::U256 {
         let idx = 0;
         let len = (WORD as u64);
         while (idx < len) {
-            let a_bit = Vector::borrow_mut(&mut a.bits, idx);
-            let b_bit = Vector::borrow(&b.bits, idx);
+            let a_bit = Vector::borrow_mut<u64>(&mut a.bits, idx);
+            let b_bit = Vector::borrow<u64>(&b.bits, idx);
             *a_bit = Sender::Arith::sbb(*a_bit, *b_bit, &mut borrow);
             idx = idx + 1;
         };
 
         // check overflow
         assert!(borrow == 0, 100);
-
     }
-
-    // TODO: Similar situation with `add_nocarry`
-    // spec sub_noborrow {
-    //     aborts_if value_of_U256(a) < value_of_U256(b);
-    //     ensures value_of_U256(a) == value_of_U256(old(a)) - value_of_U256(b);
-    // }
-
-    native fun from_bytes(data: &vector<u8>, be: bool): U256;
-    native fun native_add(a: &mut U256, b: &U256);
-    native fun native_sub(a: &mut U256, b: &U256);
-    native fun native_mul(a: &mut U256, b: &U256);
-    native fun native_div(a: &mut U256, b: &U256);
-    native fun native_rem(a: &mut U256, b: &U256);
-    native fun native_pow(a: &mut U256, b: &U256);
-
-    spec native_add {
-        pragma opaque;
-        aborts_if value_of_U256(a) + value_of_U256(b) >= P64 * P64 * P64 * P64;
-        ensures value_of_U256(a) == value_of_U256(old(a)) + value_of_U256(b);
-    }
-
-    spec native_sub {
-        pragma opaque;
-        aborts_if value_of_U256(a) - value_of_U256(b) < 0;
-        ensures value_of_U256(a) == value_of_U256(old(a)) - value_of_U256(b);
-    }
-
-    spec native_mul {
-        pragma opaque;
-        aborts_if value_of_U256(a) * value_of_U256(b) >= P64 * P64 * P64 * P64;
-        ensures value_of_U256(a) == value_of_U256(old(a)) * value_of_U256(b);
-    }
-
-    spec native_div {
-        pragma opaque;
-        aborts_if value_of_U256(b) == 0;
-        ensures value_of_U256(a) == value_of_U256(old(a)) / value_of_U256(b);
-    }
-
-    spec native_rem {
-        pragma opaque;
-        aborts_if value_of_U256(b) == 0;
-        ensures value_of_U256(a) == value_of_U256(old(a)) % value_of_U256(b);
-    }
-
-    spec native_pow {
-        pragma opaque;
-        aborts_if pow_spec(value_of_U256(a), value_of_U256(b)) >= P64 * P64 * P64 * P64;
-        ensures value_of_U256(a) == pow_spec(value_of_U256(old(a)), value_of_U256(b));
-    }
-
-    spec fun pow_spec(base: num, expon: num): num {
-        // This actually doesn't follow a strict definition as 0^0 is undefined
-        // mathematically. But the U256::pow of Rust is defined to be like this:
-        // Link: https://docs.rs/uint/0.9.3/src/uint/uint.rs.html#1000-1003
-        if (expon > 0) {
-            let x = pow_spec(base, expon / 2);
-            if (expon % 2 == 0) { x * x } else { x * x * base }
-        } else {
-            1
-        }
-    }
-
 }
