@@ -88,6 +88,16 @@ module Sender::Arith {
         ensures borrow == 0 ==> result == a - b - old(borrow);
         ensures borrow == 1 ==> result == P64 + a - b - old(borrow);
     }
+
+    /*fun leading_zeros(v: u64): u64 {
+        let zeros = 0u64;
+        let head_bit = 0xf000000000000000u64;
+        while(v & head_bit == 0u64) {
+            head_bit = head_bit >> 8;
+            zeros = zeros + 8;
+        };
+        v
+    }*/
 }
 
 /// Implementation u256.
@@ -101,6 +111,7 @@ module Sender::U256 {
     use Std::Errors;
 
     const WORD: u8 = 4;
+    const N_WORDS: u64 = 4u64;
     const P32: u64 = 0x100000000;
     const P64: u128 = 0x10000000000000000;
     const P64MAX: u64 = 0xffffffffffffffff;
@@ -108,6 +119,7 @@ module Sender::U256 {
 
     const ERR_INVALID_LENGTH: u64 = 100;
     const ERR_OVERFLOW: u64 = 200;
+    const ERR_DIVISION_BY_ZERO: u64 = 300;
     /// use vector to represent data.
     /// so that we can use buildin vector ops later to construct U256.
     /// vector should always has two elements.
@@ -120,10 +132,68 @@ module Sender::U256 {
         invariant len(bits) == 4;
     }
 
+    /*fun full_shl(v: &U256): U256 {
+        *v
+    }
+
+    fun leading_zeros(v: &U256): u64 {
+        let (i, r) = (0u64, 0u64);
+        while (i < N_WORDS) {
+            let w = Vector::borrow(&(v.bits), N_WORDS - i - 1);
+            if (*w == 0) {
+                r = r + 64;
+            }
+            else {
+                r = r + Sender::Arith::leading_zeros(*w);
+                break;
+            }
+        };
+        r
+    }
+
+    fun div_mod_kunth(a: &mut U256, b: &mut U256, n: u64, m: u64): (U256, U256) {
+        assert!(m + n <= N_WORDS, Errors::invalid_state(ERR_INVALID_LENGTH));
+
+        let b_bit = Vector::borrow_mut(&mut b.bits, n-1);
+        let shift = leading_zeros(b);
+
+        (*a, *b)
+    }
+
+    public fun div_mod(a: U256, b: U256): (U256, U256) {
+        assert!(is_zero(&b), Errors::invalid_state(ERR_DIVISION_BY_ZERO));
+        let cmp = compare(&a, &b);
+        if (cmp == LESS_THAN) {
+            return (zero(), b)
+        }
+        else if (cmp == EQUAL) {
+            return (one(), zero())
+        };
+
+        cmp = compare(&a, &from_u128(P128MAX));
+        if (cmp == EQUAL || cmp == LESS_THAN) {
+            let a1 = to_u128(&a);
+            let b1 = to_u128(&b);
+            return (from_u128(a1 / b1), from_u128(a1 % b1))
+        };
+
+        div_mod_kunth(&mut a, &mut b, N_WORDS, 0u64)
+    }
+
+    public fun div(a: U256, b: U256): U256 {
+        let (c, _) = div_mod(a, b);
+        c
+    }
+
+    public fun mod(a: U256, b: U256): U256 {
+        let (_, c) = div_mod(a, b);
+        c
+    }*/
+
     public fun mul(a: U256, b: U256): U256 {
         let c_bits = Vector::empty<u64>();
         let (i, j) = (0u64, 0u64);
-        let len = (WORD as u64);
+        let len = N_WORDS;
         let (c_i, c_len) = (0u64, len * 2);
         while (c_i < c_len) {
             Vector::push_back(&mut c_bits, 0u64);
@@ -166,7 +236,7 @@ module Sender::U256 {
         c_i = Vector::length(&c_bits) - 1;
         while(c_i >= len) {
             let overflow = Vector::remove(&mut c_bits, c_i);
-            assert!(overflow == 0, 100);
+            assert!(overflow == 0, Errors::invalid_state(ERR_OVERFLOW));
             c_i = c_i - 1;
         };
 
@@ -267,7 +337,7 @@ module Sender::U256 {
     const GREATER_THAN: u8 = 2;
 
     public fun compare(a: &U256, b: &U256): u8 {
-        let i = (WORD as u64);
+        let i = N_WORDS;
         while (i > 0) {
             i = i - 1;
             let a_bits = *Vector::borrow<u64>(&a.bits, i);
@@ -294,6 +364,16 @@ module Sender::U256 {
         assert!(compare(&a, &d) == GREATER_THAN, 2);
     }
 
+    public fun is_zero(v: &U256): bool {
+        let i = N_WORDS;
+        while (i > 0) {
+            i = i - 1;
+            let v_bit = *Vector::borrow<u64>(&v.bits, i);
+            if (v_bit != 0) return false
+        };
+
+        return true
+    }
 
     public fun add(a: U256, b: U256): U256 {
         add_nocarry(&mut a, &b);
@@ -355,8 +435,6 @@ module Sender::U256 {
         let ret = sub(a, b);
         assert!(compare(&ret, &from_u64(9)) == EQUAL, 0);
     }
-
-
 
     spec mul {
         pragma verify = false;
@@ -478,7 +556,7 @@ module Sender::U256 {
     fun add_nocarry(a: &mut U256, b: &U256) {
         let carry = 0;
         let idx = 0;
-        let len = (WORD as u64);
+        let len = N_WORDS;
         while (idx < len) {
             let a_bit = Vector::borrow_mut<u64>(&mut a.bits, idx);
             let b_bit = Vector::borrow<u64>(&b.bits, idx);
@@ -494,7 +572,7 @@ module Sender::U256 {
     fun add_overflow_nocarry(a: & U256, b: &U256): (U256, bool) {
         let carry = 0;
         let idx = 0;
-        let len = (WORD as u64);
+        let len = N_WORDS;
         let c_bits = Vector::empty<u64>();
         while (idx < len) {
             let a_bit = Vector::borrow<u64>(&a.bits, idx);
@@ -532,7 +610,7 @@ module Sender::U256 {
     fun sub_noborrow(a: &mut U256, b: &U256) {
         let borrow = 0;
         let idx = 0;
-        let len = (WORD as u64);
+        let len = N_WORDS;
         while (idx < len) {
             let a_bit = Vector::borrow_mut<u64>(&mut a.bits, idx);
             let b_bit = Vector::borrow<u64>(&b.bits, idx);
