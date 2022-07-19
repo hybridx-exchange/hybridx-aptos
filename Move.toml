@@ -7,4 +7,5 @@ AptosFramework = { git = "https://github.com/aptos-labs/aptos-core.git", subdir 
 
 [addresses]
 Sender = "0x6C5A7402558350788DB8169FCF575DF2FADC56E95638BBF6E11E7E40B38EC57B"
+TestUser = "0x5678"
 

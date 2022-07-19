@@ -10,6 +10,8 @@ module Sender::TokenSwap {
     use AptosFramework::Comparator::Result;
     use Std::Option;
     use Sender::Math;
+    use AptosFramework::Timestamp;
+    use Sender::FixedPoint64;
 
     struct LiquidityCoin<phantom coin_x, phantom coin_y> has key, store, copy, drop {}
 
@@ -162,6 +164,22 @@ module Sender::TokenSwap {
         (x_reserve, y_reserve)
     }
 
+    fun update<X: copy + drop + store, Y: copy + drop + store>(x_reserve: u64, y_reserve: u64) acquires Pair {
+        let pair = borrow_global_mut<Pair<X, Y>>(Config::admin_address());
+
+        let last_block_timestamp = pair.last_block_timestamp;
+        let block_timestamp = Timestamp::now_seconds() % (1u64 << 32);
+        let time_elapsed = block_timestamp - last_block_timestamp;
+        if (time_elapsed > 0 && x_reserve > 0 && y_reserve > 0) {
+            let last_price_0_cumulative = FixedPoint64::to_u128(FixedPoint64::div(FixedPoint64::encode(x_reserve), y_reserve)) * (time_elapsed as u128);
+            let last_price_1_cumulative = FixedPoint64::to_u128(FixedPoint64::div(FixedPoint64::encode(y_reserve), x_reserve)) * (time_elapsed as u128);
+            pair.last_price_0_cumulative = *&pair.last_price_0_cumulative + last_price_0_cumulative;
+            pair.last_price_1_cumulative = *&pair.last_price_1_cumulative + last_price_1_cumulative;
+        };
+
+        pair.last_block_timestamp = block_timestamp;
+    }
+
     public fun mint<X: copy + drop + store, Y: copy + drop + store>(
         x: Coin::Coin<X>,
         y: Coin::Coin<Y>
@@ -199,7 +217,7 @@ module Sender::TokenSwap {
         let liquidity_cap = borrow_global<LiquidityCoinCapability<X, Y>>(admin_address);
         let mint_liquidity = Coin::mint(liquidity, &liquidity_cap.mint);
 
-
+        update<X, Y>(x_reserve, y_reserve);
 
         mint_liquidity
     }
