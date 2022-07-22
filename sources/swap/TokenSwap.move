@@ -221,4 +221,10 @@ module Sender::TokenSwap {
 
         mint_liquidity
     }
+
+    /*public fun burn<X: copy + drop + store, Y: copy + drop + store>(
+        liquidity: Coin::Coin<LiquidityCoin<X, Y>>
+    ): (Coin::Coin<X>, Coin::Coin<Y>) acquires Pair, LiquidityCoinCapability {
+        let l = liquidity
+    }*/
 }

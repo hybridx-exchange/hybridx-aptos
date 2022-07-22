@@ -87,7 +87,7 @@ module Sender::CoinMock {
         let coin = mint_coin<WETH>(10000u64, Signer::address_of(account));
         Offer::create<Coin<WETH>>(account, coin, Signer::address_of(other));
 
-        let received = Offer::redeem<Coin<WETH>>(other, Signer::address_of(account));//you don't know the type of Coin
+        let received = Offer::redeem<Coin<WETH>>(other, Signer::address_of(account));//you maybe don't know the type of Coin
         register_internal<WETH>(other);
         transfer_coin(received, Signer::address_of(other));
     }
