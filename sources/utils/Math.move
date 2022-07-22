@@ -1,6 +1,6 @@
 /// The module provide some improved math calculations.
 module Sender::Math {
-    use Std::Vector;
+    use std::vector;
 
     // TODO: verify the module.
     spec module {
@@ -134,11 +134,11 @@ module Sender::Math {
 
     /// calculate sum of nums
     public fun sum(nums: &vector<u128>): u128 {
-        let len = Vector::length(nums);
+        let len = vector::length(nums);
         let i = 0;
         let sum = 0;
         while (i < len){
-            sum = sum + *Vector::borrow(nums, i);
+            sum = sum + *vector::borrow(nums, i);
             i = i + 1;
         };
         sum
@@ -146,7 +146,7 @@ module Sender::Math {
 
     /// calculate average of nums
     public fun avg(nums: &vector<u128>): u128{
-        let len = Vector::length(nums);
+        let len = vector::length(nums);
         let sum = sum(nums);
         sum/(len as u128)
     }

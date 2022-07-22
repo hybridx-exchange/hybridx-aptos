@@ -4,7 +4,6 @@ version = "0.0.0"
 
 [dependencies]
 AptosFramework = { git = "https://github.com/aptos-labs/aptos-core.git", subdir = "aptos-move/framework/aptos-framework/", rev = "9593a8d515b7c82886064812753b237d82075e35" }
-Std = { git = "https://github.com/aptos-labs/aptos-core.git", subdir = "aptos-move/framework/MoveStdLib/", rev = "9593a8d515b7c82886064812753b237d82075e35" }
 
 [addresses]
 Sender = "0xF8FFC1B4CED065A3D41DD8B892945FC9DEBFFFC4390AD80CC76FC026A1108A6A"

@@ -1,23 +1,21 @@
 module Sender::TokenSwap {
-    use AptosFramework::Coin;
-    use Std::Event;
     use Sender::Config;
-    use AptosFramework::TypeInfo::TypeInfo;
-    use AptosFramework::TypeInfo::type_of;
-    use AptosFramework::Comparator;
-    use Std::ASCII;
-    use Std::Signer;
-    use AptosFramework::Comparator::Result;
-    use Std::Option;
-    use Sender::Math;
-    use AptosFramework::Timestamp;
     use Sender::FixedPoint64;
+    use aptos_framework::coin;
+    use aptos_std::type_info::{TypeInfo, type_of};
+    use aptos_std::event;
+    use aptos_std::comparator::{Result, is_equal, compare};
+    use aptos_framework::timestamp;
+    use Sender::Math;
+    use std::option;
+    use std::signer;
+    use std::string;
 
     struct LiquidityCoin<phantom coin_x, phantom coin_y> has key, store, copy, drop {}
 
     struct LiquidityCoinCapability<phantom coin_x, phantom coin_y> has key, store {
-        mint: Coin::MintCapability<LiquidityCoin<coin_x, coin_y>>,
-        burn: Coin::BurnCapability<LiquidityCoin<coin_x, coin_y>>
+        mint: coin::MintCapability<LiquidityCoin<coin_x, coin_y>>,
+        burn: coin::BurnCapability<LiquidityCoin<coin_x, coin_y>>
     }
 
     struct PairRegisterEvent has drop, store {
@@ -55,8 +53,8 @@ module Sender::TokenSwap {
     }
 
     struct Pair<phantom coin_0, phantom coin_1> has key, store {
-        coin_0_reserve: Coin::Coin<coin_0>,
-        coin_1_reserve: Coin::Coin<coin_1>,
+        coin_0_reserve: coin::Coin<coin_0>,
+        coin_1_reserve: coin::Coin<coin_1>,
         last_block_timestamp: u64,
         last_price_0_cumulative: u128,
         last_price_1_cumulative: u128,
@@ -64,10 +62,10 @@ module Sender::TokenSwap {
     }
 
     struct LiquidityEventHandle has key, store {
-        register_pair_event: Event::EventHandle<PairRegisterEvent>,
-        add_liquidity_event: Event::EventHandle<AddLiquidityEvent>,
-        remove_liquidity_event: Event::EventHandle<RemoveLiquidityEvent>,
-        swap_event: Event::EventHandle<SwapEvent>
+        register_pair_event: event::EventHandle<PairRegisterEvent>,
+        add_liquidity_event: event::EventHandle<AddLiquidityEvent>,
+        remove_liquidity_event: event::EventHandle<RemoveLiquidityEvent>,
+        swap_event: event::EventHandle<SwapEvent>
     }
 
     const ERROR_SWAP_INVALID_TOKEN_PAIR: u64 = 2000;
@@ -90,16 +88,16 @@ module Sender::TokenSwap {
         if (!exists<LiquidityEventHandle>(admin)) {
             Config::assert_admin(signer);
             move_to(signer, LiquidityEventHandle {
-                add_liquidity_event: Event::new_event_handle<AddLiquidityEvent>(signer),
-                remove_liquidity_event: Event::new_event_handle<RemoveLiquidityEvent>(signer),
-                swap_event: Event::new_event_handle<SwapEvent>(signer),
-                register_pair_event: Event::new_event_handle<PairRegisterEvent>(signer),
+                add_liquidity_event: event::new_event_handle<AddLiquidityEvent>(signer),
+                remove_liquidity_event: event::new_event_handle<RemoveLiquidityEvent>(signer),
+                swap_event: event::new_event_handle<SwapEvent>(signer),
+                register_pair_event: event::new_event_handle<PairRegisterEvent>(signer),
             });
         };
     }
 
     public fun assert_is_coin<TypeInfo: store>(): bool {
-        assert!(Coin::is_coin_initialized<TypeInfo>(), ERROR_SWAP_TOKEN_NOT_EXISTS);
+        assert!(coin::is_coin_initialized<TypeInfo>(), ERROR_SWAP_TOKEN_NOT_EXISTS);
         true
     }
 
@@ -107,13 +105,13 @@ module Sender::TokenSwap {
         let x_type = type_of<X>();
         let y_type = type_of<Y>();
 
-        Comparator::compare<TypeInfo>(&x_type, &y_type)
+        compare<TypeInfo>(&x_type, &y_type)
     }
 
     public fun create_pair<X: copy + drop + store, Y: copy + drop + store>(): Pair<X, Y> {
         Pair<X, Y> {
-            coin_0_reserve: Coin::zero<X>(),
-            coin_1_reserve: Coin::zero<Y>(),
+            coin_0_reserve: coin::zero<X>(),
+            coin_1_reserve: coin::zero<Y>(),
             last_block_timestamp: 0u64,
             last_price_0_cumulative: 0u128,
             last_price_1_cumulative: 0u128,
@@ -123,10 +121,10 @@ module Sender::TokenSwap {
 
     fun register_liquidity_coin<X: copy + drop + store, Y: copy + drop + store>(signer: &signer) {
         let (mint_capability, burn_capability) =
-            Coin::initialize<LiquidityCoin<X, Y>>(
+            coin::initialize<LiquidityCoin<X, Y>>(
                 signer,
-                ASCII::string(LIQUIDITY_COIN_NAME),
-                ASCII::string(LIQUIDITY_COIN_SYMBOL),
+                string::utf8(LIQUIDITY_COIN_NAME),
+                string::utf8(LIQUIDITY_COIN_SYMBOL),
                 LIQUIDITY_COIN_SCALE,
                 true
             );
@@ -141,7 +139,7 @@ module Sender::TokenSwap {
 
         init_event_handle(signer);
         let result = compare_coin<X, Y>();
-        assert!(Comparator::is_equal(&result), ERROR_SWAP_INVALID_TOKEN_PAIR);
+        assert!(is_equal(&result), ERROR_SWAP_INVALID_TOKEN_PAIR);
 
         let pair = create_pair<X, Y>();
         move_to(signer, pair);
@@ -149,17 +147,17 @@ module Sender::TokenSwap {
         register_liquidity_coin<X, Y>(signer);
 
         let event_handle = borrow_global_mut<LiquidityEventHandle>(Config::admin_address());
-        Event::emit_event(&mut event_handle.register_pair_event, PairRegisterEvent {
+        event::emit_event(&mut event_handle.register_pair_event, PairRegisterEvent {
             coin_x_type: type_of<X>(),
             coin_y_type: type_of<Y>(),
-            signer: Signer::address_of(signer)
+            signer: signer::address_of(signer)
         });
     }
 
     public fun get_reserves<X: copy + drop + store, Y: copy + drop + store>(): (u64, u64) acquires Pair {
         let pair = borrow_global<Pair<X, Y>>(Config::admin_address());
-        let x_reserve = Coin::value(&pair.coin_0_reserve);
-        let y_reserve = Coin::value(&pair.coin_1_reserve);
+        let x_reserve = coin::value(&pair.coin_0_reserve);
+        let y_reserve = coin::value(&pair.coin_1_reserve);
 
         (x_reserve, y_reserve)
     }
@@ -168,7 +166,7 @@ module Sender::TokenSwap {
         let pair = borrow_global_mut<Pair<X, Y>>(Config::admin_address());
 
         let last_block_timestamp = pair.last_block_timestamp;
-        let block_timestamp = Timestamp::now_seconds() % (1u64 << 32);
+        let block_timestamp = timestamp::now_seconds() % (1u64 << 32);
         let time_elapsed = block_timestamp - last_block_timestamp;
         if (time_elapsed > 0 && x_reserve > 0 && y_reserve > 0) {
             let last_price_0_cumulative = FixedPoint64::to_u128(FixedPoint64::div(FixedPoint64::encode(x_reserve), y_reserve)) * (time_elapsed as u128);
@@ -181,15 +179,15 @@ module Sender::TokenSwap {
     }
 
     public fun mint<X: copy + drop + store, Y: copy + drop + store>(
-        x: Coin::Coin<X>,
-        y: Coin::Coin<Y>
-    ): Coin::Coin<LiquidityCoin<X, Y>> acquires Pair, LiquidityCoinCapability {
-        let total_supply_option = Coin::supply<LiquidityCoin<X, Y>>();
-        let total_supply = Option::get_with_default(&total_supply_option, 0u128);
+        x: coin::Coin<X>,
+        y: coin::Coin<Y>
+    ): coin::Coin<LiquidityCoin<X, Y>> acquires Pair, LiquidityCoinCapability {
+        let total_supply_option = coin::supply<LiquidityCoin<X, Y>>();
+        let total_supply = option::get_with_default(&total_supply_option, 0u128);
         let (x_reserve, y_reserve) = get_reserves<X, Y>();
 
-        let x_value = Coin::value<X>(&x);
-        let y_value = Coin::value<Y>(&y);
+        let x_value = coin::value<X>(&x);
+        let y_value = coin::value<Y>(&y);
 
         let liquidity = if (total_supply == 0u128) {
             let init_liquidity = Math::sqrt((x_value as u128) * (y_value as u128));
@@ -212,10 +210,10 @@ module Sender::TokenSwap {
         let admin_address = Config::admin_address();
         let _pair = borrow_global_mut<Pair<X, Y>>(admin_address);
 
-        Coin::deposit<X>(admin_address, x);
-        Coin::deposit<Y>(admin_address, y);
+        coin::deposit<X>(admin_address, x);
+        coin::deposit<Y>(admin_address, y);
         let liquidity_cap = borrow_global<LiquidityCoinCapability<X, Y>>(admin_address);
-        let mint_liquidity = Coin::mint(liquidity, &liquidity_cap.mint);
+        let mint_liquidity = coin::mint(liquidity, &liquidity_cap.mint);
 
         update<X, Y>(x_reserve, y_reserve);
 

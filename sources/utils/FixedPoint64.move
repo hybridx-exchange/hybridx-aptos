@@ -1,5 +1,5 @@
 module Sender::FixedPoint64 {
-    use Std::Errors;
+    use std::error;
 
     const LOWER_MASK: u64 = 18446744073709551615u64; /// decimal of UQ64x64 (lower 64 bits), equal to 0xffffffffffffffff
     const U128_MAX: u128 = 340282366920938463463374607431768211455u128;
@@ -64,7 +64,7 @@ module Sender::FixedPoint64 {
     // divide a UQ128x128 by a u128, returning a UQ128x128
     public fun div(uq: UQ64x64, y: u64): UQ64x64 {
         if (y == 0) {
-            abort Errors::invalid_argument(ERR_DIVIDE_BY_ZERO)
+            abort error::invalid_argument(ERR_DIVIDE_BY_ZERO)
         };
         let v = *&uq.v / (y as u128);
         UQ64x64 {
