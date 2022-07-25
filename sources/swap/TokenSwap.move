@@ -4,12 +4,24 @@ module Sender::TokenSwap {
     use aptos_framework::coin;
     use aptos_std::type_info::{TypeInfo, type_of};
     use aptos_std::event;
-    use aptos_std::comparator::{Result, is_equal, compare};
+    use aptos_std::comparator::{compare, is_smaller_than, is_equal};
     use aptos_framework::timestamp;
     use Sender::Math;
     use std::option;
     use std::signer;
     use std::string;
+    use std::debug;
+    #[test_only]
+    use std::unit_test::create_signers_for_testing;
+    #[test_only]
+    use std::vector;
+    #[test_only]
+    use Sender::CoinMock::{WETH, register_coin, WDAI, mint_coin};
+    use aptos_framework::coin::register_internal;
+
+    const EQUAL: u8 = 0;
+    const SMALLER: u8 = 1;
+    const GREATER: u8 = 2;
 
     struct LiquidityCoin<phantom coin_x, phantom coin_y> has key, store, copy, drop {}
 
@@ -101,11 +113,19 @@ module Sender::TokenSwap {
         true
     }
 
-    public fun compare_coin<X: copy + drop + store, Y: copy + drop + store>(): Result {
+    public fun compare_coin<X: copy + drop + store, Y: copy + drop + store>(): u8 {
         let x_type = type_of<X>();
         let y_type = type_of<Y>();
-
-        compare<TypeInfo>(&x_type, &y_type)
+        debug::print(&x_type);
+        debug::print(&y_type);
+        let result = compare<TypeInfo>(&x_type, &y_type);
+        if (is_equal(&result)) {
+            EQUAL
+        } else if (is_smaller_than(&result)) {
+            SMALLER
+        } else {
+            GREATER
+        }
     }
 
     public fun create_pair<X: copy + drop + store, Y: copy + drop + store>(): Pair<X, Y> {
@@ -139,12 +159,13 @@ module Sender::TokenSwap {
 
         init_event_handle(signer);
         let result = compare_coin<X, Y>();
-        assert!(is_equal(&result), ERROR_SWAP_INVALID_TOKEN_PAIR);
+        assert!(result == SMALLER, ERROR_SWAP_INVALID_TOKEN_PAIR);
 
-        let pair = create_pair<X, Y>();
-        move_to(signer, pair);
+        register_internal<LiquidityCoin<X, Y>>(signer);
 
         register_liquidity_coin<X, Y>(signer);
+        let pair = create_pair<X, Y>();
+        move_to(signer, pair);
 
         let event_handle = borrow_global_mut<LiquidityEventHandle>(Config::admin_address());
         event::emit_event(&mut event_handle.register_pair_event, PairRegisterEvent {
@@ -167,6 +188,7 @@ module Sender::TokenSwap {
 
         let last_block_timestamp = pair.last_block_timestamp;
         let block_timestamp = timestamp::now_seconds() % (1u64 << 32);
+        debug::print(pair);
         let time_elapsed = block_timestamp - last_block_timestamp;
         if (time_elapsed > 0 && x_reserve > 0 && y_reserve > 0) {
             let last_price_0_cumulative = FixedPoint64::to_u128(FixedPoint64::div(FixedPoint64::encode(x_reserve), y_reserve)) * (time_elapsed as u128);
@@ -185,7 +207,6 @@ module Sender::TokenSwap {
         let total_supply_option = coin::supply<LiquidityCoin<X, Y>>();
         let total_supply = option::get_with_default(&total_supply_option, 0u128);
         let (x_reserve, y_reserve) = get_reserves<X, Y>();
-
         let x_value = coin::value<X>(&x);
         let y_value = coin::value<Y>(&y);
 
@@ -208,10 +229,11 @@ module Sender::TokenSwap {
 
         assert!(liquidity > 0u64, ERROR_SWAP_ADDLIQUIDITY_INVALID);
         let admin_address = Config::admin_address();
-        let _pair = borrow_global_mut<Pair<X, Y>>(admin_address);
-
+        let pair = borrow_global<Pair<X, Y>>(admin_address);
+        debug::print(pair);
         coin::deposit<X>(admin_address, x);
         coin::deposit<Y>(admin_address, y);
+
         let liquidity_cap = borrow_global<LiquidityCoinCapability<X, Y>>(admin_address);
         let mint_liquidity = coin::mint(liquidity, &liquidity_cap.mint);
 
@@ -220,9 +242,63 @@ module Sender::TokenSwap {
         mint_liquidity
     }
 
-    /*public fun burn<X: copy + drop + store, Y: copy + drop + store>(
-        liquidity: Coin::Coin<LiquidityCoin<X, Y>>
-    ): (Coin::Coin<X>, Coin::Coin<Y>) acquires Pair, LiquidityCoinCapability {
-        let l = liquidity
-    }*/
+    public fun burn_liquidity<X: copy + drop + store, Y: copy + drop + store>(
+        liquidity: coin::Coin<LiquidityCoin<X, Y>>
+    ) acquires LiquidityCoinCapability {
+        let liquidity_cap = borrow_global<LiquidityCoinCapability<X, Y>>(Config::admin_address());
+        coin::burn(liquidity, &liquidity_cap.burn);
+    }
+
+    public fun burn<X: copy + drop + store, Y: copy + drop + store>(
+        liquidity: coin::Coin<LiquidityCoin<X, Y>>
+    ): (coin::Coin<X>, coin::Coin<Y>) acquires Pair, LiquidityCoinCapability {
+        let burn_value = coin::value(&liquidity);
+        let pair = borrow_global_mut<Pair<X, Y>>(Config::admin_address());
+        let x_reserve = coin::value(&pair.coin_0_reserve);
+        let y_reserve = coin::value(&pair.coin_1_reserve);
+
+        let total_supply_option = coin::supply<LiquidityCoin<X, Y>>();
+        let total_supply = option::get_with_default(&total_supply_option, 0u128);
+        let x = ((burn_value as u128) * (x_reserve as u128)) / (total_supply);
+        let y = ((burn_value as u128) * (y_reserve as u128)) / (total_supply);
+
+        assert!(x > 0 && y > 0, ERROR_SWAP_BURN_CALC_INVALID);
+        burn_liquidity(liquidity);
+
+        let x_coin = coin::extract<X>(&mut pair.coin_0_reserve, (x as u64));
+        let y_coin = coin::extract<Y>(&mut pair.coin_1_reserve, (y as u64));
+        update<X, Y>(x_reserve, y_reserve);
+
+        (x_coin, y_coin)
+    }
+
+    #[test(root = @Root, account = @Sender)]
+    public fun test_mint_pair(root: &signer, account: &signer) acquires LiquidityEventHandle, Pair, LiquidityCoinCapability {
+        timestamp::set_time_has_started_for_testing(root);
+        let others = create_signers_for_testing(2);
+        let other1 = &vector::remove(&mut others, 0);
+        let other2 = &vector::remove(&mut others, 0);
+        debug::print(&signer::address_of(account));
+        debug::print(&signer::address_of(other1));
+        debug::print(&signer::address_of(other2));
+
+        register_coin<WETH>(account, string::utf8(b"Wapper ETH"), string::utf8(b"WETH"), 9);
+        register_internal<WETH>(account);
+        register_coin<WDAI>(account, string::utf8(b"Wapper DAI"), string::utf8(b"WDAI"), 9);
+        register_internal<WDAI>(account);
+
+        let coin_x = mint_coin<WETH>(10000000000000, signer::address_of(account));
+        let coin_y = mint_coin<WDAI>(100000000000000000, signer::address_of(account));
+        if (SMALLER == compare_coin<WETH, WDAI>()) {
+            register_pair<WETH, WDAI>(account);
+            let coin_pair = mint<WETH, WDAI>(coin_x, coin_y);
+            debug::print(&coin_pair);
+            coin::deposit(signer::address_of(account), coin_pair);
+        } else {
+            register_pair<WDAI, WETH>(account);
+            let coin_pair = mint<WDAI, WETH>(coin_y, coin_x);
+            debug::print(&coin_pair);
+            coin::deposit(signer::address_of(account), coin_pair);
+        }
+    }
 }

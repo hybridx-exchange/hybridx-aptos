@@ -37,7 +37,6 @@ module Sender::CoinMock {
         let (mint_capability, burn_capability) =
             coin::initialize<TokenType>(account, name, symbol, (precision as u64), true);
         move_to(account, TokenSharedCapability<TokenType> { mint: mint_capability, burn: burn_capability });
-        //Coin::register_internal<TokenType>(account);
     }
 
     public fun mint_coin<TokenType: store>(amount: u64, to: address): coin::Coin<TokenType> acquires TokenSharedCapability {
