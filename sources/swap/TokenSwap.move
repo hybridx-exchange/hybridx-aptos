@@ -64,12 +64,12 @@ module Sender::TokenSwap {
         y_out: u64
     }
 
-    struct Pair<phantom coin_0, phantom coin_1> has key, store {
-        coin_0_reserve: coin::Coin<coin_0>,
-        coin_1_reserve: coin::Coin<coin_1>,
+    struct Pair<phantom coin_x, phantom coin_y> has key, store {
+        coin_x_reserve: coin::Coin<coin_x>,
+        coin_y_reserve: coin::Coin<coin_y>,
         last_block_timestamp: u64,
-        last_price_0_cumulative: u128,
-        last_price_1_cumulative: u128,
+        last_price_x_cumulative: u128,
+        last_price_y_cumulative: u128,
         last_k: u128
     }
 
@@ -130,11 +130,11 @@ module Sender::TokenSwap {
 
     public fun create_pair<X: copy + drop + store, Y: copy + drop + store>(): Pair<X, Y> {
         Pair<X, Y> {
-            coin_0_reserve: coin::zero<X>(),
-            coin_1_reserve: coin::zero<Y>(),
+            coin_x_reserve: coin::zero<X>(),
+            coin_y_reserve: coin::zero<Y>(),
             last_block_timestamp: 0u64,
-            last_price_0_cumulative: 0u128,
-            last_price_1_cumulative: 0u128,
+            last_price_x_cumulative: 0u128,
+            last_price_y_cumulative: 0u128,
             last_k: 0u128
         }
     }
@@ -177,8 +177,8 @@ module Sender::TokenSwap {
 
     public fun get_reserves<X: copy + drop + store, Y: copy + drop + store>(): (u64, u64) acquires Pair {
         let pair = borrow_global<Pair<X, Y>>(Config::admin_address());
-        let x_reserve = coin::value(&pair.coin_0_reserve);
-        let y_reserve = coin::value(&pair.coin_1_reserve);
+        let x_reserve = coin::value(&pair.coin_x_reserve);
+        let y_reserve = coin::value(&pair.coin_y_reserve);
 
         (x_reserve, y_reserve)
     }
@@ -193,8 +193,8 @@ module Sender::TokenSwap {
         if (time_elapsed > 0 && x_reserve > 0 && y_reserve > 0) {
             let last_price_0_cumulative = FixedPoint64::to_u128(FixedPoint64::div(FixedPoint64::encode(x_reserve), y_reserve)) * (time_elapsed as u128);
             let last_price_1_cumulative = FixedPoint64::to_u128(FixedPoint64::div(FixedPoint64::encode(y_reserve), x_reserve)) * (time_elapsed as u128);
-            pair.last_price_0_cumulative = *&pair.last_price_0_cumulative + last_price_0_cumulative;
-            pair.last_price_1_cumulative = *&pair.last_price_1_cumulative + last_price_1_cumulative;
+            pair.last_price_x_cumulative = *&pair.last_price_x_cumulative + last_price_0_cumulative;
+            pair.last_price_y_cumulative = *&pair.last_price_y_cumulative + last_price_1_cumulative;
         };
 
         pair.last_block_timestamp = block_timestamp;
@@ -254,8 +254,8 @@ module Sender::TokenSwap {
     ): (coin::Coin<X>, coin::Coin<Y>) acquires Pair, LiquidityCoinCapability {
         let burn_value = coin::value(&liquidity);
         let pair = borrow_global_mut<Pair<X, Y>>(Config::admin_address());
-        let x_reserve = coin::value(&pair.coin_0_reserve);
-        let y_reserve = coin::value(&pair.coin_1_reserve);
+        let x_reserve = coin::value(&pair.coin_x_reserve);
+        let y_reserve = coin::value(&pair.coin_y_reserve);
 
         let total_supply_option = coin::supply<LiquidityCoin<X, Y>>();
         let total_supply = option::get_with_default(&total_supply_option, 0u128);
@@ -265,8 +265,8 @@ module Sender::TokenSwap {
         assert!(x > 0 && y > 0, ERROR_SWAP_BURN_CALC_INVALID);
         burn_liquidity(liquidity);
 
-        let x_coin = coin::extract<X>(&mut pair.coin_0_reserve, (x as u64));
-        let y_coin = coin::extract<Y>(&mut pair.coin_1_reserve, (y as u64));
+        let x_coin = coin::extract<X>(&mut pair.coin_x_reserve, (x as u64));
+        let y_coin = coin::extract<Y>(&mut pair.coin_y_reserve, (y as u64));
         update<X, Y>(x_reserve, y_reserve);
 
         (x_coin, y_coin)
@@ -298,7 +298,11 @@ module Sender::TokenSwap {
             register_pair<WDAI, WETH>(account);
             let coin_pair = mint<WDAI, WETH>(coin_y, coin_x);
             debug::print(&coin_pair);
-            coin::deposit(signer::address_of(account), coin_pair);
+
+            register_internal<LiquidityCoin<WDAI, WETH>>(other1);
+
+            coin::deposit(signer::address_of(other1), coin_pair);
+            debug::print(&coin::balance<LiquidityCoin<WDAI, WETH>>(signer::address_of(account)));
         }
     }
 }
