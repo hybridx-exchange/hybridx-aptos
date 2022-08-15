@@ -1,4 +1,4 @@
-module Sender::FixedPoint64 {
+module HybridX::FixedPoint64 {
     use std::error;
 
     const LOWER_MASK: u64 = 18446744073709551615u64; /// decimal of UQ64x64 (lower 64 bits), equal to 0xffffffffffffffff

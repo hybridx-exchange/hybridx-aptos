@@ -1,5 +1,5 @@
 /// The module provide some improved math calculations.
-module Sender::Math {
+module HybridX::Math {
     use std::vector;
 
     // TODO: verify the module.

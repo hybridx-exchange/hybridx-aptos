@@ -1,12 +1,12 @@
-module Sender::TokenSwap {
-    use Sender::Config;
-    use Sender::FixedPoint64;
+module HybridX::TokenSwap {
+    use HybridX::Config;
+    use HybridX::FixedPoint64;
     use aptos_framework::coin;
     use aptos_std::type_info::{TypeInfo, type_of};
     use aptos_std::event;
     use aptos_std::comparator::{compare, is_smaller_than, is_equal};
     use aptos_framework::timestamp;
-    use Sender::Math;
+    use HybridX::Math;
     use std::option;
     use std::signer;
     use std::string;
@@ -16,8 +16,8 @@ module Sender::TokenSwap {
     #[test_only]
     use std::vector;
     #[test_only]
-    use Sender::CoinMock::{WETH, register_coin, WDAI, mint_coin};
-    use aptos_framework::coin::register_internal;
+    use HybridX::CoinMock::{WETH, register_coin, WDAI, mint_coin};
+    use aptos_framework::coins::register;
 
     const EQUAL: u8 = 0;
     const SMALLER: u8 = 1;
@@ -161,7 +161,7 @@ module Sender::TokenSwap {
         let result = compare_coin<X, Y>();
         assert!(result == SMALLER, ERROR_SWAP_INVALID_TOKEN_PAIR);
 
-        register_internal<LiquidityCoin<X, Y>>(signer);
+        register<LiquidityCoin<X, Y>>(signer);
 
         register_liquidity_coin<X, Y>(signer);
         let pair = create_pair<X, Y>();
@@ -272,7 +272,7 @@ module Sender::TokenSwap {
         (x_coin, y_coin)
     }
 
-    #[test(root = @Root, account = @Sender)]
+    #[test(root = @Root, account = @HybridX)]
     public fun test_mint_pair(root: &signer, account: &signer) acquires LiquidityEventHandle, Pair, LiquidityCoinCapability {
         timestamp::set_time_has_started_for_testing(root);
         let others = create_signers_for_testing(2);
@@ -283,9 +283,9 @@ module Sender::TokenSwap {
         debug::print(&signer::address_of(other2));
 
         register_coin<WETH>(account, string::utf8(b"Wapper ETH"), string::utf8(b"WETH"), 9);
-        register_internal<WETH>(account);
+        register<WETH>(account);
         register_coin<WDAI>(account, string::utf8(b"Wapper DAI"), string::utf8(b"WDAI"), 9);
-        register_internal<WDAI>(account);
+        register<WDAI>(account);
 
         let coin_x = mint_coin<WETH>(10000000000000, signer::address_of(account));
         let coin_y = mint_coin<WDAI>(100000000000000000, signer::address_of(account));
@@ -299,7 +299,7 @@ module Sender::TokenSwap {
             let coin_pair = mint<WDAI, WETH>(coin_y, coin_x);
             debug::print(&coin_pair);
 
-            register_internal<LiquidityCoin<WDAI, WETH>>(other1);
+            register<LiquidityCoin<WDAI, WETH>>(other1);
 
             coin::deposit(signer::address_of(other1), coin_pair);
             debug::print(&coin::balance<LiquidityCoin<WDAI, WETH>>(signer::address_of(account)));

@@ -1,4 +1,4 @@
-module Sender::Config {
+module HybridX::Config {
     use std::signer;
     use std::error;
 
@@ -6,7 +6,7 @@ module Sender::Config {
     const ERROR_GLOBAL_FREEZE: u64 = 102;
 
     public fun admin_address(): address {
-        @Sender
+        @HybridX
     }
 
     public fun assert_admin(signer: &signer) {
